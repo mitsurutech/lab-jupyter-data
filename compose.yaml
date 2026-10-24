@@ -1,0 +1,334 @@
+# JupyterLab for data science: pandas, NumPy, Matplotlib and scikit-learn, a year of bike hires
+# and the weather, and a starter notebook, in a JupyterLab of your own.
+#
+# Your copy is the only thing you may use, and it is the only thing you can reach: this lab
+# has no way out to the internet, so nothing you try can touch anybody else's machine.
+# Never point a tool at a site you do not own, in a lab or anywhere else.
+#
+# Open JupyterLab from the lab's page. The work folder holds hires.csv (365 days of 2025, one
+# row a day: date, month, weekday, weather, temp_c, rain_mm and hires, the bikes hired that
+# day), start.ipynb, a notebook that loads it, summarises it, draws it and fits a first
+# model, and steps/, short scripts that each do one idea at a time. The terminal beside
+# the lab reaches the same Python with docker exec, for example
+#   docker exec jupyter python3 steps/load.py
+#
+# Hand in a notebook of your own over hires.csv (for example which weather has the most hires
+# on a weekend, or how much one more degree is worth), downloaded from JupyterLab with File,
+# Download, and a sentence on what the data showed.
+#
+# The image runs as its own unprivileged account and needs no capabilities. JupyterLab asks
+# for no token, because the platform's own door in front of it already knows who you are; do
+# not run it like this anywhere else. Nothing is saved: download your notebook before you stop
+# the lab, because stopping it forgets every file you made.
+
+services:
+  jupyter:
+    image: jupyter/scipy-notebook:2023-10-20
+    user: "1000:100"
+    expose: ["8888"]
+    working_dir: /home/jovyan/work
+    environment:
+      HOME: /home/jovyan
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mkdir -p /home/jovyan/work /tmp/lab
+        cat > /tmp/lab/make.py <<'PY'
+        import csv, datetime, json, math, random
+
+        # One row a day for 2025, the same every time: a fixed seed, nothing downloaded.
+        r = random.Random(2025)
+        first = datetime.date(2025, 1, 1)
+        with open("hires.csv", "w", newline="") as out:
+            w = csv.writer(out)
+            w.writerow(["date", "month", "weekday", "weather", "temp_c", "rain_mm", "hires"])
+            for n in range(365):
+                day = first + datetime.timedelta(days=n)
+                temp = 11 - 7 * math.cos(2 * math.pi * (n - 15) / 365) + r.gauss(0, 2.5)
+                roll = r.random()
+                weather = "rainy" if roll < 0.3 else "cloudy" if roll < 0.65 else "sunny"
+                rain = round(r.uniform(1, 14), 1) if weather == "rainy" else 0.0
+                bikes = (140 + 11 * temp - 7 * rain + (60 if day.weekday() >= 5 else 0)
+                         + (25 if weather == "sunny" else 0) + r.gauss(0, 25))
+                w.writerow([day.isoformat(), day.strftime("%b"), day.strftime("%a"), weather,
+                            round(temp, 1), rain, max(0, round(bikes))])
+
+        def md(text):
+            return {"cell_type": "markdown", "metadata": {}, "source": text}
+
+        def code(text):
+            return {"cell_type": "code", "metadata": {}, "source": text, "outputs": [],
+                    "execution_count": None}
+
+        cells = [
+            md("# Bike hires and the weather\n\nThe file hires.csv has one row for every day of 2025: "
+               "the weather, the temperature in degrees Celsius, the rain in millimetres and "
+               "how many bikes were hired. Run each cell with Shift and Enter."),
+            code("import pandas as pd\n\nhires = pd.read_csv(\"hires.csv\", parse_dates=[\"date\"])\nhires.head()"),
+            code("hires.describe()"),
+            code("hires.groupby(\"weather\")[\"hires\"].mean().round(1)"),
+            code("import matplotlib.pyplot as plt\n\nhires.plot.scatter(x=\"temp_c\", y=\"hires\", alpha=0.5)\nplt.title(\"Bikes hired against temperature\")\nplt.show()"),
+            code("from sklearn.linear_model import LinearRegression\n\nX = hires[[\"temp_c\", \"rain_mm\"]]\ny = hires[\"hires\"]\nmodel = LinearRegression().fit(X, y)\nprint(\"one more degree:\", round(model.coef_[0], 1), \"hires\")\nprint(\"one more millimetre of rain:\", round(model.coef_[1], 1), \"hires\")\nprint(\"R squared:\", round(model.score(X, y), 3))"),
+            md("## Your own question\n\nAdd a cell below and ask the data something of your own: "
+               "are weekends busier, which month is the quietest, or does a model do better "
+               "if it knows the weekday?"),
+        ]
+        book = {"cells": cells, "nbformat": 4, "nbformat_minor": 5,
+                "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3 (ipykernel)",
+                                            "language": "python"},
+                             "language_info": {"name": "python"}}}
+        with open("start.ipynb", "w") as out:
+            json.dump(book, out, indent=1)
+
+        # Short scripts the lessons' Run buttons start from the terminal, one idea each: the first
+        # five for the basic lesson, the rest for the data science module (mess.py is a helper).
+        LOAD = 'import pandas as pd\n\nhires = pd.read_csv("hires.csv")\n'
+        steps = {
+            "load.py": LOAD + 'print(hires.shape)\nprint(hires.head())\n',
+            "summary.py": LOAD + 'print(hires["hires"].describe().round(1))\n',
+            "weather.py": LOAD + 'print(hires.groupby("weather")["hires"].mean().round(1))\n',
+            "picture.py": 'import matplotlib\nmatplotlib.use("Agg")\nimport matplotlib.pyplot as plt\n'
+                          + LOAD + '\nhires.plot.scatter(x="temp_c", y="hires", alpha=0.5)\n'
+                          'plt.title("Bikes hired against temperature")\nplt.savefig("hires.png")\n'
+                          'print("saved hires.png")\n',
+            "model.py": 'from sklearn.linear_model import LinearRegression\n' + LOAD
+                        + '\nX = hires[["temp_c", "rain_mm"]]\ny = hires["hires"]\n'
+                        'model = LinearRegression().fit(X, y)\n'
+                        'print("one more degree:", round(model.coef_[0], 1), "hires")\n'
+                        'print("one more millimetre of rain:", round(model.coef_[1], 1), "hires")\n'
+                        'print("R squared:", round(model.score(X, y), 3))\n',
+            "filter.py": 'import pandas as pd\n\n'
+                         'hires = pd.read_csv("hires.csv")\n'
+                         'busy = hires[hires["hires"] > 400]\n'
+                         'print("days with more than 400 hires:", len(busy))\n'
+                         'print(busy["weekday"].value_counts())\n',
+            "weekend.py": 'import pandas as pd\n\n'
+                          'hires = pd.read_csv("hires.csv")\n'
+                          'hires["weekend"] = hires["weekday"].isin(["Sat", "Sun"])\n'
+                          'print(hires.groupby("weekend")["hires"].agg(["count", "mean", "median"]).round(1))\n',
+            "months.py": 'import pandas as pd\n\n'
+                         'hires = pd.read_csv("hires.csv")\n'
+                         'order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]\n'
+                         'print(hires.groupby("month")["hires"].mean().round(1).reindex(order))\n',
+            "mess.py": 'import numpy as np\n'
+                       'import pandas as pd\n\n\n'
+                       'def make():\n'
+                       '    # A copy of hires.csv with the faults a real export has, always in the same rows.\n'
+                       '    messy = pd.read_csv("hires.csv")\n'
+                       '    messy["hires"] = messy["hires"].astype(str)\n'
+                       '    messy.loc[[20, 21, 22, 150, 151], "temp_c"] = np.nan\n'
+                       '    messy.loc[60, "temp_c"] = 99.9\n'
+                       '    messy.loc[200, "hires"] = "-5"\n'
+                       '    messy.loc[250, "hires"] = "unknown"\n'
+                       '    messy.loc[[304, 305], "weather"] = "Sunny "\n'
+                       '    messy.loc[307, "weather"] = "SUNNY"\n'
+                       '    messy = pd.concat([messy, messy.iloc[[40, 41]]], ignore_index=True)\n'
+                       '    messy.to_csv("messy.csv", index=False)\n',
+            "messy.py": 'import pandas as pd\n'
+                        'from mess import make\n\n'
+                        'make()\n'
+                        'messy = pd.read_csv("messy.csv")\n'
+                        'print("rows:", len(messy))\n'
+                        'print(messy.dtypes)\n'
+                        'print(messy.isna().sum())\n'
+                        'print("repeated rows:", messy.duplicated().sum())\n'
+                        'print("highest temperature:", messy["temp_c"].max())\n'
+                        'print(messy["weather"].value_counts())\n',
+            "clean.py": 'import pandas as pd\n'
+                        'from mess import make\n\n'
+                        'make()\n'
+                        'clean = pd.read_csv("messy.csv")\n'
+                        'print("rows at the start:", len(clean))\n'
+                        'clean = clean.drop_duplicates().copy()\n'
+                        'print("after removing repeated rows:", len(clean))\n'
+                        'clean["hires"] = pd.to_numeric(clean["hires"], errors="coerce")\n'
+                        'clean = clean[clean["hires"] >= 0].copy()\n'
+                        'print("after removing hires that are not a count:", len(clean))\n'
+                        'clean["weather"] = clean["weather"].str.strip().str.lower()\n'
+                        'clean.loc[clean["temp_c"] > 45, "temp_c"] = None\n'
+                        'print("temperatures missing:", clean["temp_c"].isna().sum())\n'
+                        'clean["temp_c"] = clean["temp_c"].fillna(clean["temp_c"].median())\n'
+                        'print("temperatures missing after filling:", clean["temp_c"].isna().sum())\n'
+                        'print(clean["weather"].value_counts())\n',
+            "hist.py": 'import matplotlib\n'
+                       'matplotlib.use("Agg")\n'
+                       'import matplotlib.pyplot as plt\n'
+                       'import numpy as np\n'
+                       'import pandas as pd\n\n'
+                       'hires = pd.read_csv("hires.csv")\n'
+                       'counts, edges = np.histogram(hires["hires"], bins=range(0, 550, 50))\n'
+                       'for n in range(len(counts)):\n'
+                       '    print(int(edges[n]), "to", int(edges[n + 1]) - 1, ":", counts[n])\n'
+                       'hires["hires"].plot.hist(bins=range(0, 550, 50))\n'
+                       'plt.title("How many days had each number of hires")\n'
+                       'plt.savefig("hist.png")\n'
+                       'print("saved hist.png")\n',
+            "axis.py": 'import matplotlib\n'
+                       'matplotlib.use("Agg")\n'
+                       'import matplotlib.pyplot as plt\n'
+                       'import pandas as pd\n\n'
+                       'hires = pd.read_csv("hires.csv")\n'
+                       'means = hires.groupby("weather")["hires"].mean()\n'
+                       'fig, axes = plt.subplots(1, 2, figsize=(8, 3))\n'
+                       'means.plot.bar(ax=axes[0], title="Axis from 0")\n'
+                       'means.plot.bar(ax=axes[1], title="Axis from 220")\n'
+                       'axes[1].set_ylim(220, 320)\n'
+                       'plt.tight_layout()\n'
+                       'plt.savefig("axis.png")\n'
+                       'print("sunny over rainy, real values:", round(means["sunny"] / means["rainy"], 2))\n'
+                       'print("sunny over rainy, bars from 220:", round((means["sunny"] - 220) / (means["rainy"] - 220), 1))\n'
+                       'print("saved axis.png")\n',
+            "line.py": 'from sklearn.linear_model import LinearRegression\n'
+                       'import pandas as pd\n\n'
+                       'hires = pd.read_csv("hires.csv")\n'
+                       'X = hires[["temp_c"]]\n'
+                       'y = hires["hires"]\n'
+                       'model = LinearRegression().fit(X, y)\n'
+                       'print("slope:", round(model.coef_[0], 1), "hires a degree")\n'
+                       'print("intercept:", round(model.intercept_, 1), "hires at 0 degrees")\n'
+                       'print("R squared:", round(model.score(X, y), 3))\n'
+                       'guess = model.predict(pd.DataFrame({"temp_c": [10, 20]}))\n'
+                       'print("at 10 and 20 degrees:", round(guess[0]), round(guess[1]))\n',
+            "split.py": 'from sklearn.linear_model import LinearRegression\n'
+                        'from sklearn.model_selection import train_test_split\n'
+                        'import pandas as pd\n\n'
+                        'hires = pd.read_csv("hires.csv")\n'
+                        'X = hires[["temp_c"]]\n'
+                        'y = hires["hires"]\n'
+                        'X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=1)\n'
+                        'model = LinearRegression().fit(X_train, y_train)\n'
+                        'print("days to learn from:", len(X_train), "days kept back:", len(X_test))\n'
+                        'print("R squared, days learnt from:", round(model.score(X_train, y_train), 3))\n'
+                        'print("R squared, days kept back:", round(model.score(X_test, y_test), 3))\n'
+                        'error = (model.predict(X_test) - y_test).abs().mean()\n'
+                        'print("mean error on days kept back:", round(error, 1), "hires")\n',
+            "knn.py": 'from sklearn.metrics import accuracy_score, confusion_matrix\n'
+                      'from sklearn.model_selection import train_test_split\n'
+                      'from sklearn.neighbors import KNeighborsClassifier\n'
+                      'import pandas as pd\n\n'
+                      'hires = pd.read_csv("hires.csv")\n'
+                      'label = hires["hires"].apply(lambda n: "busy" if n >= 300 else "quiet")\n'
+                      'X = hires[["temp_c", "rain_mm"]]\n'
+                      'X_train, X_test, y_train, y_test = train_test_split(X, label, test_size=0.25, random_state=1)\n'
+                      'knn = KNeighborsClassifier(n_neighbors=5).fit(X_train, y_train)\n'
+                      'guess = knn.predict(X_test)\n'
+                      'print("busy days in the year:", (label == "busy").sum(), "of", len(label))\n'
+                      'print("accuracy:", round(accuracy_score(y_test, guess), 3))\n'
+                      'print("always saying quiet:", round((y_test == "quiet").mean(), 3))\n'
+                      'print("rows are the truth, columns the guess: busy, quiet")\n'
+                      'print(confusion_matrix(y_test, guess, labels=["busy", "quiet"]))\n',
+            "knnk.py": 'from sklearn.model_selection import train_test_split\n'
+                       'from sklearn.neighbors import KNeighborsClassifier\n'
+                       'import pandas as pd\n\n'
+                       'hires = pd.read_csv("hires.csv")\n'
+                       'label = hires["hires"].apply(lambda n: "busy" if n >= 300 else "quiet")\n'
+                       'X = hires[["temp_c", "rain_mm"]]\n'
+                       'X_train, X_test, y_train, y_test = train_test_split(X, label, test_size=0.25, random_state=1)\n'
+                       'for k in [1, 3, 5, 15, 45, 135]:\n'
+                       '    knn = KNeighborsClassifier(n_neighbors=k).fit(X_train, y_train)\n'
+                       '    print("k =", k, "learnt from:", round(knn.score(X_train, y_train), 3), "kept back:", round(knn.score(X_test, y_test), 3))\n',
+            "kmeans.py": 'from sklearn.cluster import KMeans\n'
+                         'from sklearn.preprocessing import StandardScaler\n'
+                         'import pandas as pd\n\n'
+                         'hires = pd.read_csv("hires.csv")\n'
+                         'scaled = StandardScaler().fit_transform(hires[["temp_c", "hires"]])\n'
+                         'hires["group"] = KMeans(n_clusters=3, n_init=10, random_state=0).fit_predict(scaled)\n'
+                         'summary = hires.groupby("group")[["temp_c", "hires"]].mean().round(1)\n'
+                         'summary["days"] = hires["group"].value_counts()\n'
+                         'print(summary.sort_values("temp_c").to_string(index=False))\n',
+            "elbow.py": 'from sklearn.cluster import KMeans\n'
+                        'from sklearn.preprocessing import StandardScaler\n'
+                        'import pandas as pd\n\n'
+                        'hires = pd.read_csv("hires.csv")\n'
+                        'scaled = StandardScaler().fit_transform(hires[["temp_c", "hires"]])\n'
+                        'for k in range(1, 7):\n'
+                        '    model = KMeans(n_clusters=k, n_init=10, random_state=0).fit(scaled)\n'
+                        '    print("k =", k, "spread inside the groups:", round(model.inertia_, 1))\n',
+            "perceptron.py": 'from sklearn.linear_model import Perceptron\n'
+                             'from sklearn.model_selection import train_test_split\n'
+                             'from sklearn.preprocessing import StandardScaler\n'
+                             'import pandas as pd\n\n'
+                             'hires = pd.read_csv("hires.csv")\n'
+                             'hires["weekend"] = hires["weekday"].isin(["Sat", "Sun"]).astype(int)\n'
+                             'label = (hires["hires"] >= 300).astype(int)\n'
+                             'X = StandardScaler().fit_transform(hires[["temp_c", "rain_mm", "weekend"]])\n'
+                             'X_train, X_test, y_train, y_test = train_test_split(X, label, test_size=0.25, random_state=1)\n'
+                             'model = Perceptron(random_state=0).fit(X_train, y_train)\n'
+                             'print("weights for temp_c, rain_mm, weekend:", model.coef_[0].round(2))\n'
+                             'print("bias:", model.intercept_.round(2))\n'
+                             'print("passes over the data:", model.n_iter_)\n'
+                             'print("accuracy on days kept back:", round(model.score(X_test, y_test), 3))\n',
+            "network.py": 'from sklearn.model_selection import train_test_split\n'
+                          'from sklearn.neural_network import MLPClassifier\n'
+                          'from sklearn.preprocessing import StandardScaler\n'
+                          'import pandas as pd\n\n'
+                          'hires = pd.read_csv("hires.csv")\n'
+                          'hires["weekend"] = hires["weekday"].isin(["Sat", "Sun"]).astype(int)\n'
+                          'label = (hires["hires"] >= 300).astype(int)\n'
+                          'X = StandardScaler().fit_transform(hires[["temp_c", "rain_mm", "weekend"]])\n'
+                          'X_train, X_test, y_train, y_test = train_test_split(X, label, test_size=0.25, random_state=1)\n'
+                          'for size in [2, 8, 32]:\n'
+                          '    model = MLPClassifier(hidden_layer_sizes=(size,), max_iter=3000, random_state=0).fit(X_train, y_train)\n'
+                          '    print(size, "hidden units, accuracy on days kept back:", round(model.score(X_test, y_test), 3))\n',
+            "bigram.py": '# A tiny language model: count which word follows which in a short text.\n'
+                         'text = ("the shop opens at nine . the shop hires bikes by the hour . "\n'
+                         '        "the bikes are red . a customer hires a bike . the customer pays at the desk . "\n'
+                         '        "the desk is by the door . the shop closes at six .")\n'
+                         'words = text.split()\n'
+                         'counts = {}\n'
+                         'for n in range(len(words) - 1):\n'
+                         '    pair = words[n] + " " + words[n + 1]\n'
+                         '    counts[pair] = counts.get(pair, 0) + 1\n'
+                         'total = words[:-1].count("the")\n'
+                         'print("after the word the, out of", total, "times:")\n'
+                         'for pair in counts:\n'
+                         '    if pair.startswith("the "):\n'
+                         '        print("  ", pair.split()[1], counts[pair], "=", round(counts[pair] / total, 2))\n',
+            "generate.py": 'import random\n\n'
+                           '# The same tiny text, used to write new sentences one word at a time.\n'
+                           'text = ("the shop opens at nine . the shop hires bikes by the hour . "\n'
+                           '        "the bikes are red . a customer hires a bike . the customer pays at the desk . "\n'
+                           '        "the desk is by the door . the shop closes at six .")\n'
+                           'words = text.split()\n'
+                           'follows = {}\n'
+                           'for n in range(len(words) - 1):\n'
+                           '    follows.setdefault(words[n], []).append(words[n + 1])\n'
+                           'pick = random.Random(2)\n'
+                           'for line in range(4):\n'
+                           '    word = "the"\n'
+                           '    sentence = [word]\n'
+                           '    while word != "." and len(sentence) < 12:\n'
+                           '        word = pick.choice(follows[word])\n'
+                           '        sentence.append(word)\n'
+                           '    print(" ".join(sentence))\n',
+        }
+        import os
+        os.makedirs("steps", exist_ok=True)
+        for name, text in steps.items():
+            with open(os.path.join("steps", name), "w") as out:
+                out.write(text)
+        PY
+        cd /home/jovyan/work
+        python3 /tmp/lab/make.py
+        exec jupyter lab --no-browser --ip=0.0.0.0 --port=8888 \
+          --ServerApp.root_dir=/home/jovyan/work \
+          --IdentityProvider.token= --ServerApp.password= \
+          '--ServerApp.allow_origin=*' --ServerApp.allow_remote_access=True \
+          --LabApp.check_for_updates_class=jupyterlab.NeverCheckForUpdate \
+          --LabApp.news_url=None
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/api', timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    labels:
+      lab.title: JupyterLab
+      lab.open: "8888"
